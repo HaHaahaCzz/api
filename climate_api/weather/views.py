@@ -1,30 +1,64 @@
-from rest_framework import generics
+from django.db.models import Avg, Max, Min
+from django.shortcuts import get_object_or_404
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
 from .models import City, WeatherRecord
+from .openweather import fetch_and_save_city
 from .serializers import CitySerializer, WeatherRecordSerializer
+
+
+# ── 自定义权限：读公开，写需认证 ──────────────────────────
+class IsAuthenticatedOrReadOnly(IsAuthenticatedOrReadOnly):
+    """GET/HEAD/OPTIONS 公开；POST/PUT/PATCH/DELETE 需认证。"""
+    pass
+
 
 # City 的 CRUD
 class CityListCreateView(generics.ListCreateAPIView):
     queryset = City.objects.all()
     serializer_class = CitySerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 class CityRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = City.objects.all()
     serializer_class = CitySerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 # WeatherRecord 的查询
 class WeatherRecordListView(generics.ListCreateAPIView):
     queryset = WeatherRecord.objects.all()
     serializer_class = WeatherRecordSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 class WeatherRecordDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = WeatherRecord.objects.all()
     serializer_class = WeatherRecordSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 
-from django.db.models import Avg, Max, Min
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
+class LiveWeatherView(APIView):
+    """GET: pull live weather from OpenWeatherMap for one city and upsert today's record."""
+
+    def get(self, request):
+        city_id = request.query_params.get("city_id")
+        if not city_id:
+            return Response(
+                {"error": "请提供 city_id 参数"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        city = get_object_or_404(City, pk=city_id)
+        record, err = fetch_and_save_city(city)
+        if err:
+            return Response(
+                {"error": err},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        payload = dict(WeatherRecordSerializer(record).data)
+        payload["source"] = "openweathermap"
+        return Response(payload)
 
 
 class CityTemperatureTrendView(APIView):
