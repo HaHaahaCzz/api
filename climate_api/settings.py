@@ -63,7 +63,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',    # 默认允许所有人
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',  # GET 公开，POST/PUT/DELETE 需 Token
     ],
 }
 

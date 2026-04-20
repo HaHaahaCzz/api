@@ -114,6 +114,62 @@ class WeatherRecordAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
 
+    def test_list_weather_records_returns_all_cities(self):
+        another_city = City.objects.create(
+            name="NoDataCity",
+            country="CN",
+            latitude=22.3,
+            longitude=114.2,
+        )
+
+        url = reverse("weather-list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+
+        city_payload = {item["city"]: item for item in response.data}
+        self.assertIn(self.city.pk, city_payload)
+        self.assertIn(another_city.pk, city_payload)
+        self.assertIsNone(city_payload[another_city.pk]["id"])
+        self.assertIsNone(city_payload[another_city.pk]["date"])
+
+    def test_list_weather_records_history_returns_raw_rows(self):
+        WeatherRecord.objects.create(
+            city=self.city,
+            date=date(2024, 6, 14),
+            temperature=20.5,
+            humidity=62,
+            pm25=38.0,
+            wind_speed=2.8,
+        )
+
+        url = reverse("weather-list")
+        response = self.client.get(url, {"history": "1"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+
+    def test_list_weather_records_filter_by_city_name(self):
+        nanjing = City.objects.create(
+            name="Nanjing",
+            country="CN",
+            latitude=32.0603,
+            longitude=118.7969,
+        )
+        WeatherRecord.objects.create(
+            city=nanjing,
+            date=date(2024, 6, 16),
+            temperature=26.0,
+            humidity=58,
+            pm25=35.0,
+            wind_speed=3.0,
+        )
+
+        url = reverse("weather-list")
+        response = self.client.get(url, {"city_name": "Nanjing"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["city"], nanjing.pk)
+
     def test_retrieve_weather_record(self):
         url = reverse("weather-detail", args=[self.record.pk])
         response = self.client.get(url)

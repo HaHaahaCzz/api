@@ -1,4 +1,4 @@
-from django.db.models import Avg, Max, Min
+from django.db.models import Avg, Max, Min, OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
@@ -32,6 +32,58 @@ class WeatherRecordListView(generics.ListCreateAPIView):
     queryset = WeatherRecord.objects.all()
     serializer_class = WeatherRecordSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def list(self, request, *args, **kwargs):
+        city_id = request.query_params.get("city_id")
+        city_name = request.query_params.get("city_name")
+
+        city_filters = {}
+        if city_id:
+            city_filters["id"] = city_id
+        if city_name and city_name.strip():
+            city_filters["name__iexact"] = city_name.strip()
+
+        filtered_cities = City.objects.filter(**city_filters).order_by("id")
+
+        # Allow clients to opt into raw historical rows.
+        history = request.query_params.get("history", "").lower()
+        if history in {"1", "true", "yes"}:
+            records = (
+                WeatherRecord.objects.filter(city__in=filtered_cities)
+                .order_by("-date", "-id")
+            )
+            serializer = WeatherRecordSerializer(records, many=True)
+            return Response(serializer.data)
+
+        latest_record_id = Subquery(
+            WeatherRecord.objects.filter(city_id=OuterRef("pk"))
+            .order_by("-date", "-id")
+            .values("id")[:1]
+        )
+        cities = filtered_cities.annotate(latest_record_id=latest_record_id)
+        records = WeatherRecord.objects.filter(
+            id__in=[city.latest_record_id for city in cities if city.latest_record_id]
+        )
+        record_map = {record.id: record for record in records}
+
+        payload = []
+        for city in cities:
+            record = record_map.get(city.latest_record_id)
+            if record:
+                payload.append(WeatherRecordSerializer(record).data)
+                continue
+            payload.append(
+                {
+                    "id": None,
+                    "city": city.id,
+                    "date": None,
+                    "temperature": None,
+                    "humidity": None,
+                    "pm25": None,
+                    "wind_speed": None,
+                }
+            )
+        return Response(payload)
 
 class WeatherRecordDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = WeatherRecord.objects.all()
